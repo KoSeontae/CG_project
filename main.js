@@ -2,199 +2,220 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-// 1. 장면, 카메라, 렌더러
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x222222);
+let scene, camera, renderer, controls;
+let modelPivot, modelRoot;
+let waypoints = [];
+let glitter;
+let initialCameraPosition, initialTarget;
+let isDragging = false;
+const previousMousePosition = { x: 0, y: 0 };
+const rotationSpeed = 0.02;
 
-const camera = new THREE.PerspectiveCamera(
-    60, window.innerWidth / window.innerHeight, 0.1, 1000
-);
-camera.position.set(0, 2, 6);
+init();
+loadModel();
+animate();
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.2;
-renderer.outputColorSpace = THREE.SRGBColorSpace;
-document.body.appendChild(renderer.domElement);
+function init() {
+  // ——————————————————
+  // 1) 기본 씬/카메라/렌더러/컨트롤
+  // ——————————————————
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x222222);
 
-// 2. 조명
-scene.add(new THREE.AmbientLight(0xffffff, 1.2));
-const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
-dirLight.position.set(5, 12, 8);
-scene.add(dirLight);
+  // 조명
+  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+  const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+  dirLight.position.set(5, 10, 7.5);
+  scene.add(dirLight);
 
-// 3. 컨트롤 (OrbitControls)
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enablePan = true;
-controls.screenSpacePanning = true;
+  // 카메라
+  camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+  camera.position.set(0, 2, 6);
 
-// 4. 모델 중심 저장용 변수
-let modelCenter = new THREE.Vector3(0, 0, 0);
+  // 렌더러
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.appendChild(renderer.domElement);
 
-// 5. GLB 모델 로드
-const loader = new GLTFLoader();
-loader.load(
-    'model.glb',
-    (gltf) => {
-        scene.add(gltf.scene);
+  // OrbitControls
+  controls = new OrbitControls(camera, renderer.domElement);
 
-        // 모델의 중심 자동 계산
-        const box = new THREE.Box3().setFromObject(gltf.scene);
-        box.getCenter(modelCenter);
-        controls.target.copy(modelCenter); // 최초에만 center로 세팅
-        controls.update();
+  controls.enableRotate = false;  // OrbitControls 의 드래그-회전 비활성화
+  controls.enablePan    = false;
 
-        // (디버그: 모델 중심/크기 로그)
-        const size = new THREE.Vector3();
-        box.getSize(size);
-        console.log('Bounding box:', box);
-        console.log('Size:', size);
-        console.log('Center:', modelCenter);
+  // **초기 상태 저장**
+  initialCameraPosition = camera.position.clone();
+  initialTarget = controls.target.clone();
 
-        animate(); // 모델이 로드된 뒤에 애니메이션 시작
-    },
-    undefined,
-    (error) => {
-        console.error('GLB 로드 실패:', error);
-    }
-);
+  // 이벤트 리스너
+  window.addEventListener('resize', onWindowResize);
+  window.addEventListener('keydown', onKeyDown);
 
-// 6. 경로상에 원(파동) 파라미터
-const start = new THREE.Vector3(0, 0.86, 0.01);       // 시상하부 위치
-const end = new THREE.Vector3(0.2, 1.0, 0.05);        // 기관 위치(예시, 수정 가능)
-const NUM_CIRCLES = 20;                               // 원 개수
-const circles = [];
-const circleParams = []; // 각 원의 애니메이션 상태
-
-function createPathCircles(start, end) {
-    circles.forEach(c => scene.remove(c));
-    circles.length = 0;
-    circleParams.length = 0;
-
-    for (let i = 0; i < NUM_CIRCLES; ++i) {
-        const t = i / (NUM_CIRCLES - 1);
-        const pos = new THREE.Vector3().lerpVectors(start, end, t);
-
-        const geometry = new THREE.CircleGeometry(0.035, 32);
-        const material = new THREE.MeshBasicMaterial({
-            color: 0xffe066,
-            transparent: true,
-            opacity: 0.0,
-            depthWrite: false,
-            side: THREE.DoubleSide,
-        });
-
-        const circle = new THREE.Mesh(geometry, material);
-        circle.position.copy(pos);
-        circle.position.z += 0.01; // 겹침 방지
-        circle.rotateX(-Math.PI / 2);
-
-        scene.add(circle);
-        circles.push(circle);
-
-        circleParams.push({
-            delay: i * 0.04,   // 시간차(파동처럼 앞에서 뒤로 퍼지도록)
-            alpha: 0.0,        // 현재 알파값
-            phase: 0,          // 0: 대기, 1: 나타남, 2: 사라짐
-            t: 0               // 진행 시간
-        });
-    }
+  // 마우스 드래그로 pivot 회전
+  const canvas = renderer.domElement;
+  canvas.addEventListener('mousedown', e => {
+    isDragging = true;
+    previousMousePosition.x = e.clientX;
+    previousMousePosition.y = e.clientY;
+  });
+  canvas.addEventListener('mousemove', e => {
+    if (!isDragging || !modelPivot) return;
+    const deltaMove = {
+      x: e.clientX - previousMousePosition.x,
+      y: e.clientY - previousMousePosition.y
+    };
+    const deltaQuat = new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(
+        deltaMove.y * rotationSpeed,
+        deltaMove.x * rotationSpeed,
+        0,
+        'XYZ'
+      )
+    );
+    modelPivot.quaternion.multiplyQuaternions(deltaQuat, modelPivot.quaternion);
+    previousMousePosition.x = e.clientX;
+    previousMousePosition.y = e.clientY;
+  });
+  canvas.addEventListener('mouseup', () => isDragging = false);
 }
 
-// spacebar로 실행
-document.addEventListener('keydown', (e) => {
-    // 파동
-    if (e.code === 'Space') {
-        createPathCircles(start, end);
-        pathAnimTime = 0;
-        pathAnimationActive = true;
+function loadModel() {
+  const loader = new GLTFLoader();
+  loader.load('model.glb', gltf => {
+    // ——————————————————
+    // 2) 모델 피벗 설정
+    // ——————————————————
+    const sceneBB = new THREE.Box3().setFromObject(gltf.scene);
+    const center = sceneBB.getCenter(new THREE.Vector3());
+
+    // pivot 그룹 생성
+    modelPivot = new THREE.Group();
+    modelPivot.position.copy(center);
+    scene.add(modelPivot);
+
+    // 모델을 pivot 내부로 옮기기
+    gltf.scene.position.sub(center);
+    modelPivot.add(gltf.scene);
+    modelRoot = gltf.scene;
+
+    // 컨트롤 타겟 갱신 & 초기 타겟 재저장
+    controls.target.copy(center);
+    controls.update();
+    initialTarget.copy(center);
+
+    // ——————————————————
+    // 3) waypoints 추출
+    // ——————————————————
+    scene.updateMatrixWorld(true);
+    const nodeNames = [
+      'Hypothalamusr_grp1091',
+      'Spinal_dura003_BezierCurve458',
+      'Heart_Generated_Mesh_From_X3D787'
+    ];
+    waypoints = nodeNames.map(name => {
+      const obj = modelRoot.getObjectByName(name);
+      if (!obj) {
+        console.warn(`⚠️ 노드를 찾을 수 없음: ${name}`);
+        return null;
+      }
+      const box = new THREE.Box3().setFromObject(obj);
+      return box.getCenter(new THREE.Vector3());
+    }).filter(v => v !== null);
+
+    // ——————————————————
+    // 4) glitter 초기화
+    // ——————————————————
+    const gGeo = new THREE.SphereGeometry(0.05, 8, 8);
+    const gMat = new THREE.MeshBasicMaterial({ color: 0xffff66, transparent: true });
+    glitter = new THREE.Mesh(gGeo, gMat);
+    scene.add(glitter);
+    glitter.visible = false;
+  });
+}
+
+function dimModel(dim) {
+  if (!modelRoot) return;
+  modelRoot.traverse(obj => {
+    if (obj.isMesh) {
+      obj.material.transparent = true;
+      obj.material.opacity = dim ? 0.2 : 1.0;
     }
+  });
+}
 
-    // ----- 화면 기준 카메라 평행이동 (WASDQE/방향키) -----
-    const MOVE_STEP = 0.05;
-    const forward = new THREE.Vector3();
-    const right = new THREE.Vector3();
-    const up = new THREE.Vector3(0, 1, 0);
+function onKeyDown(e) {
+  // ◆ R: 리셋
+  if (e.code === 'KeyR') {
+    camera.position.copy(initialCameraPosition);
+    controls.target.copy(initialTarget);
+    controls.update();
+    if (modelPivot) modelPivot.quaternion.set(0, 0, 0, 1);
+    return;
+  }
 
-    // 카메라 → target 방향 (카메라가 바라보는 방향)
-    forward.subVectors(controls.target, camera.position).normalize();
-    // "우측" 벡터 (forward x up)
-    right.crossVectors(forward, up).normalize();
-    // "위쪽" 벡터 (오른손 좌표계: right x forward)
-    up.crossVectors(right, forward).normalize();
+  // ◆ Space: glitter 애니메이션
+  if (e.code === 'Space') {
+    if (waypoints.length < 2) return;
+    startGlitterAnimation();
+    return;
+  }
 
-    let move = new THREE.Vector3();
-    if (e.code === 'KeyW' || e.code === 'ArrowUp')     move.add(up);
-    if (e.code === 'KeyS' || e.code === 'ArrowDown')   move.addScaledVector(up, -1);
-    if (e.code === 'KeyA' || e.code === 'ArrowLeft')   move.addScaledVector(right, -1);
-    if (e.code === 'KeyD' || e.code === 'ArrowRight')  move.add(right);
-    if (e.code === 'KeyQ')                             move.add(forward);
-    if (e.code === 'KeyE')                             move.addScaledVector(forward, -1);
-    if (move.lengthSq() > 0) {
-        move.normalize().multiplyScalar(MOVE_STEP);
-        camera.position.add(move);
-        controls.target.add(move); // 카메라와 target을 함께 이동
-        controls.update();
+  // ◆ WASD / Q/E / 화살표키: 평행 이동
+  const MOVE_STEP = 0.1;
+  const forward = new THREE.Vector3().subVectors(controls.target, camera.position).normalize();
+  const right   = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+  const up      = new THREE.Vector3().crossVectors(right, forward).normalize();
+
+  let move = new THREE.Vector3();
+  if (e.code === 'KeyW'   || e.code === 'ArrowUp')    move.add(up);
+  if (e.code === 'KeyS'   || e.code === 'ArrowDown')  move.addScaledVector(up, -1);
+  if (e.code === 'KeyA'   || e.code === 'ArrowLeft')  move.addScaledVector(right, -1);
+  if (e.code === 'KeyD'   || e.code === 'ArrowRight') move.add(right);
+  if (e.code === 'KeyQ')                              move.add(forward);
+  if (e.code === 'KeyE')                              move.addScaledVector(forward, -1);
+
+  if (move.lengthSq() > 0) {
+    move.normalize().multiplyScalar(MOVE_STEP);
+    camera.position.add(move);
+    controls.target.add(move);
+    controls.update();
+  }
+}
+
+function startGlitterAnimation() {
+  dimModel(true);
+  glitter.visible = true;
+  let idx = 0, speed = 0.1;
+
+  const step = () => {
+    if (idx >= waypoints.length - 1) {
+      glitter.visible = false;
+      dimModel(false);
+      return;
     }
-});
+    const from = waypoints[idx], to = waypoints[idx + 1];
+    let t = 0;
+    const tick = () => {
+      t += speed;
+      if (t >= 1) { idx++; return step(); }
+      glitter.position.lerpVectors(from, to, t);
+      glitter.material.opacity = 1 - (t * 0.5);
+      requestAnimationFrame(tick);
+    };
+    tick();
+  };
 
-// 7. 파동 애니메이션
-let pathAnimationActive = false;
-let pathAnimTime = 0;
+  step();
+}
+
+function onWindowResize() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
 
 function animate() {
-    requestAnimationFrame(animate);
-
-    // 경로를 따라 원들이 시간차로 나타났다 사라지는 애니메이션
-    if (pathAnimationActive) {
-        pathAnimTime += 0.02;
-        let allDone = true;
-
-        for (let i = 0; i < circles.length; ++i) {
-            const c = circles[i];
-            const param = circleParams[i];
-
-            if (pathAnimTime < param.delay) {
-                c.material.opacity = 0.0;
-                param.phase = 0;
-                allDone = false;
-                continue;
-            }
-            if (param.phase === 0) {
-                param.t = 0;
-                param.phase = 1;
-            }
-            if (param.phase === 1) {
-                param.t += 0.04;
-                c.material.opacity = Math.min(1, param.t * 2);
-                if (c.material.opacity >= 1) {
-                    param.phase = 2;
-                    param.t = 0;
-                }
-                allDone = false;
-                continue;
-            }
-            if (param.phase === 2) {
-                param.t += 0.03;
-                c.material.opacity = Math.max(0, 1 - param.t * 2);
-                if (c.material.opacity > 0) allDone = false;
-            }
-        }
-        if (allDone) {
-            pathAnimationActive = false;
-        }
-    }
-
-    // animate에서 controls.target은 고정하지 않음!
-    controls.update();
-
-    renderer.render(scene, camera);
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
 }
-
-// 8. 창 크기 대응
-window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-});
