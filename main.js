@@ -81,56 +81,59 @@ function init() {
 
 function loadModel() {
   const loader = new GLTFLoader();
-  loader.load('model.glb', gltf => {
-    // ——————————————————
-    // 2) 모델 피벗 설정
-    // ——————————————————
-    const sceneBB = new THREE.Box3().setFromObject(gltf.scene);
-    const center = sceneBB.getCenter(new THREE.Vector3());
+  loader.load(
+    'model.glb',
+    gltf => {
+      // 1) 모델의 바운딩 박스와 중심 계산
+      const sceneBB = new THREE.Box3().setFromObject(gltf.scene);
+      const center  = sceneBB.getCenter(new THREE.Vector3());
 
-    // pivot 그룹 생성
-    modelPivot = new THREE.Group();
-    modelPivot.position.copy(center);
-    scene.add(modelPivot);
+      // 2) pivot 그룹 생성 및 scene에 추가
+      modelPivot = new THREE.Group();
+      modelPivot.position.copy(center);
+      scene.add(modelPivot);
 
-    // 모델을 pivot 내부로 옮기기
-    gltf.scene.position.sub(center);
-    modelPivot.add(gltf.scene);
-    modelRoot = gltf.scene;
+      // 3) 모델을 pivot 내부로 이동시키기
+      gltf.scene.position.sub(center);
+      modelPivot.add(gltf.scene);
+      modelRoot = gltf.scene;
 
-    // 컨트롤 타겟 갱신 & 초기 타겟 재저장
-    controls.target.copy(center);
-    controls.update();
-    initialTarget.copy(center);
+      // 4) OrbitControls 타겟 갱신 & 초기 타겟 저장
+      controls.target.copy(center);
+      controls.update();
+      initialTarget.copy(center);
 
-    // ——————————————————
-    // 3) waypoints 추출
-    // ——————————————————
-    scene.updateMatrixWorld(true);
-    const nodeNames = [
-      'Hypothalamusr_grp1091',
-      'Spinal_dura003_BezierCurve458',
-      'Heart_Generated_Mesh_From_X3D787'
-    ];
-    waypoints = nodeNames.map(name => {
-      const obj = modelRoot.getObjectByName(name);
-      if (!obj) {
-        console.warn(`⚠️ 노드를 찾을 수 없음: ${name}`);
-        return null;
-      }
-      const box = new THREE.Box3().setFromObject(obj);
-      return box.getCenter(new THREE.Vector3());
-    }).filter(v => v !== null);
+      // 5) waypoints를 pivot 로컬 좌표로 계산
+      scene.updateMatrixWorld(true);
+      const nodeNames = [
+        'Hypothalamusr_grp1091',
+        'Spinal_dura003_BezierCurve458',
+        'Heart_Generated_Mesh_From_X3D787'
+      ];
+      waypoints = nodeNames.map(name => {
+        const obj = modelRoot.getObjectByName(name);
+        if (!obj) {
+          console.warn(`⚠️ 노드를 찾을 수 없음: ${name}`);
+          return null;
+        }
+        const box = new THREE.Box3().setFromObject(obj);
+        const worldCenter = box.getCenter(new THREE.Vector3());
+        // 월드 좌표 → pivot 기준 로컬 좌표
+        return worldCenter.sub(center);
+      }).filter(v => v !== null);
 
-    // ——————————————————
-    // 4) glitter 초기화
-    // ——————————————————
-    const gGeo = new THREE.SphereGeometry(0.05, 8, 8);
-    const gMat = new THREE.MeshBasicMaterial({ color: 0xffff66, transparent: true });
-    glitter = new THREE.Mesh(gGeo, gMat);
-    scene.add(glitter);
-    glitter.visible = false;
-  });
+      // 6) glitter 메쉬를 pivot의 자식으로 추가
+      const gGeo = new THREE.SphereGeometry(0.05, 8, 8);
+      const gMat = new THREE.MeshBasicMaterial({ color: 0xffff66, transparent: true });
+      glitter = new THREE.Mesh(gGeo, gMat);
+      modelPivot.add(glitter);
+      glitter.visible = false;
+    },
+    undefined,
+    error => {
+      console.error('GLB 로드 실패:', error);
+    }
+  );
 }
 
 function dimModel(dim) {
