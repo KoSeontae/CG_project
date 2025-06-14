@@ -11,6 +11,9 @@ let isDragging = false;
 const previousMousePosition = { x: 0, y: 0 };
 const rotationSpeed = 0.02;
 
+// 애니메이션 관련 변수
+let mixer, slowAction, fastAction, stomachAction, intestineAction, clock;
+
 init();
 loadModel();
 animate();
@@ -39,13 +42,28 @@ function init() {
 
   // OrbitControls
   controls = new OrbitControls(camera, renderer.domElement);
-
-  controls.enableRotate = false;  // OrbitControls 의 드래그-회전 비활성화
+  controls.enableRotate = false;
   controls.enablePan    = false;
 
   // **초기 상태 저장**
   initialCameraPosition = camera.position.clone();
   initialTarget = controls.target.clone();
+
+  // 애니메이션 클록 생성
+  clock = new THREE.Clock();
+
+  // 버튼 추가: 교감/부교감 활성화
+  const symBtn = document.createElement('button');
+  symBtn.textContent = '교감 활성화';
+  symBtn.style = 'position: absolute; top: 10px; left: 10px; z-index: 1;';
+  symBtn.onclick = activateSympathetic;
+  document.body.appendChild(symBtn);
+
+  const paraBtn = document.createElement('button');
+  paraBtn.textContent = '부교감 활성화';
+  paraBtn.style = 'position: absolute; top: 40px; left: 10px; z-index: 1;';
+  paraBtn.onclick = activateParasympathetic;
+  document.body.appendChild(paraBtn);
 
   // 이벤트 리스너
   window.addEventListener('resize', onWindowResize);
@@ -82,7 +100,7 @@ function init() {
 function loadModel() {
   const loader = new GLTFLoader();
   loader.load(
-    'model.glb',
+    'test_animation.glb',
     gltf => {
       // 1) 모델의 바운딩 박스와 중심 계산
       const sceneBB = new THREE.Box3().setFromObject(gltf.scene);
@@ -118,7 +136,6 @@ function loadModel() {
         }
         const box = new THREE.Box3().setFromObject(obj);
         const worldCenter = box.getCenter(new THREE.Vector3());
-        // 월드 좌표 → pivot 기준 로컬 좌표
         return worldCenter.sub(center);
       }).filter(v => v !== null);
 
@@ -128,12 +145,45 @@ function loadModel() {
       glitter = new THREE.Mesh(gGeo, gMat);
       modelPivot.add(glitter);
       glitter.visible = false;
+
+      // 7) AnimationMixer와 Action 설정
+      mixer = new THREE.AnimationMixer(gltf.scene);
+      const slowClip = THREE.AnimationClip.findByName(gltf.animations, 'SlowHeartbeat');
+      const fastClip = THREE.AnimationClip.findByName(gltf.animations, 'FastHeartbeat');
+      const stomachClip = THREE.AnimationClip.findByName(gltf.animations, 'StomachMoving');
+      const intestineClip = THREE.AnimationClip.findByName(gltf.animations, 'IntestineMoving');
+
+      slowAction = mixer.clipAction(slowClip);
+      fastAction = mixer.clipAction(fastClip);
+      stomachAction = mixer.clipAction(stomachClip);
+      intestineAction = mixer.clipAction(intestineClip);
+
+      // 초기 상태: 부교감 (느린 심장 + 소화 활동)
+      slowAction.setLoop(THREE.LoopRepeat).play();
+      stomachAction.setLoop(THREE.LoopRepeat).play();
+      intestineAction.setLoop(THREE.LoopRepeat).play();
     },
     undefined,
     error => {
       console.error('GLB 로드 실패:', error);
     }
   );
+}
+
+// 교감 활성화: 느린 심장 -> 빠른 심장 전환, 소화 정지
+function activateSympathetic() {
+  if (!mixer) return;
+  slowAction.crossFadeTo(fastAction, 0.5, true);
+  stomachAction.stop();
+  intestineAction.stop();
+}
+
+// 부교감 활성화: 빠른 심장 -> 느린 심장 전환, 소화 재시작
+function activateParasympathetic() {
+  if (!mixer) return;
+  fastAction.crossFadeTo(slowAction, 0.5, true);
+  stomachAction.reset().setLoop(THREE.LoopRepeat).play();
+  intestineAction.reset().setLoop(THREE.LoopRepeat).play();
 }
 
 function dimModel(dim) {
@@ -219,6 +269,8 @@ function onWindowResize() {
 
 function animate() {
   requestAnimationFrame(animate);
+  const delta = clock.getDelta();
+  if (mixer) mixer.update(delta);
   controls.update();
   renderer.render(scene, camera);
 }
