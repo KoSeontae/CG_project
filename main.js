@@ -110,7 +110,7 @@ function init() {
 function loadModel() {
     const loader = new GLTFLoader();
     loader.load(
-        "model.glb",
+        "test_animation.glb",
         (gltf) => {
             const sceneBB = new THREE.Box3().setFromObject(gltf.scene);
             const center = sceneBB.getCenter(new THREE.Vector3());
@@ -126,6 +126,8 @@ function loadModel() {
             controls.target.copy(center);
             controls.update();
             initialTarget.copy(center);
+
+            // nodeSets 정의 (각 기관별 노드명)
             const nodeSets = {
                 heart: {
                     type: ["sympathetic", "parasympathetic"],
@@ -176,20 +178,18 @@ function loadModel() {
                 }
             };
 
+            // 모든 organ 반복
             scene.updateMatrixWorld(true);
             for (const organ in nodeSets) {
-                let nodeNames = [];
-                // pupil은 common+left 만을 기본 경로로 사용(필요시 right로도 가능)
+                // === pupil만 분기 구조 적용 ===
                 if (organ === 'pupil') {
-                    nodeNames = [
-                        ...nodeSets.pupil.common,
-                        ...nodeSets.pupil.left
-                    ];
-                } else {
-                    nodeNames = nodeSets[organ].nodes;
-                }
-                const waypoints = nodeNames
-                    .map((name) => {
+                    // 공통/좌/우 node 이름 배열 준비
+                    const commonNames = nodeSets.pupil.common;
+                    const leftNames = nodeSets.pupil.left;
+                    const rightNames = nodeSets.pupil.right;
+
+                    // 공통 경로 waypoints
+                    const waypointsCommon = commonNames.map(name => {
                         const obj = modelRoot.getObjectByName(name);
                         if (!obj) {
                             console.warn(`⚠️ 노드 없음: ${name}`);
@@ -197,44 +197,86 @@ function loadModel() {
                         }
                         const box = new THREE.Box3().setFromObject(obj);
                         return box.getCenter(new THREE.Vector3()).sub(center);
-                    })
-                    .filter((v) => v !== null);
+                    }).filter(v => v !== null);
 
-                routes[organ] = {
-                    type: nodeSets[organ].type,
-                    waypoints,
-                };
+                    // 좌/우 분기 경로(공통+분기)
+                    const waypointsLeft = [
+                        ...waypointsCommon,
+                        ...leftNames.map(name => {
+                            const obj = modelRoot.getObjectByName(name);
+                            if (!obj) {
+                                console.warn(`⚠️ 노드 없음: ${name}`);
+                                return null;
+                            }
+                            const box = new THREE.Box3().setFromObject(obj);
+                            return box.getCenter(new THREE.Vector3()).sub(center);
+                        }).filter(v => v !== null)
+                    ];
+                    const waypointsRight = [
+                        ...waypointsCommon,
+                        ...rightNames.map(name => {
+                            const obj = modelRoot.getObjectByName(name);
+                            if (!obj) {
+                                console.warn(`⚠️ 노드 없음: ${name}`);
+                                return null;
+                            }
+                            const box = new THREE.Box3().setFromObject(obj);
+                            return box.getCenter(new THREE.Vector3()).sub(center);
+                        }).filter(v => v !== null)
+                    ];
 
-                glitterParticles[organ] = [];
-                for (let i = 0; i < PARTICLE_COUNT; i++) {
-                    glitterParticles[organ].push(createGlitterParticle(0xff3366));
+                    // 경로 저장
+                    routes['pupil'] = {
+                        type: nodeSets.pupil.type,
+                        common: waypointsCommon,
+                        left: waypointsLeft,
+                        right: waypointsRight
+                    };
+
+                    // glitter 파티클도 분기(좌/우) 별도 배열로 생성
+                    glitterParticles['pupilLeft'] = [];
+                    glitterParticles['pupilRight'] = [];
+                    for (let i = 0; i < PARTICLE_COUNT; i++) {
+                        glitterParticles['pupilLeft'].push(createGlitterParticle(0xff3366));
+                        glitterParticles['pupilRight'].push(createGlitterParticle(0xff3366));
+                    }
+                }
+                // === 나머지 organ ===
+                else {
+                    let nodeNames = nodeSets[organ].nodes;
+                    const waypoints = nodeNames.map((name) => {
+                        const obj = modelRoot.getObjectByName(name);
+                        if (!obj) {
+                            console.warn(`⚠️ 노드 없음: ${name}`);
+                            return null;
+                        }
+                        const box = new THREE.Box3().setFromObject(obj);
+                        return box.getCenter(new THREE.Vector3()).sub(center);
+                    }).filter((v) => v !== null);
+
+                    routes[organ] = {
+                        type: nodeSets[organ].type,
+                        waypoints,
+                    };
+
+                    glitterParticles[organ] = [];
+                    for (let i = 0; i < PARTICLE_COUNT; i++) {
+                        glitterParticles[organ].push(createGlitterParticle(0xff3366));
+                    }
                 }
             }
 
-            // 애니메이션
+            // --- Animation Mixer 및 클립(기존 코드 유지) ---
             mixer = new THREE.AnimationMixer(gltf.scene);
-            const slowClip = THREE.AnimationClip.findByName(
-                gltf.animations,
-                "SlowHeartbeat"
-            );
-            const fastClip = THREE.AnimationClip.findByName(
-                gltf.animations,
-                "FastHeartbeat"
-            );
-            const stomachClip = THREE.AnimationClip.findByName(
-                gltf.animations,
-                "StomachMoving"
-            );
-            const intestineClip = THREE.AnimationClip.findByName(
-                gltf.animations,
-                "IntestineMoving"
-            );
+            const slowClip = THREE.AnimationClip.findByName(gltf.animations, "SlowHeartbeat");
+            const fastClip = THREE.AnimationClip.findByName(gltf.animations, "FastHeartbeat");
+            const stomachClip = THREE.AnimationClip.findByName(gltf.animations, "StomachMoving");
+            const intestineClip = THREE.AnimationClip.findByName(gltf.animations, "IntestineMoving");
 
             if (slowClip) slowAction = mixer.clipAction(slowClip);
             if (fastClip) fastAction = mixer.clipAction(fastClip);
             if (stomachClip) stomachAction = mixer.clipAction(stomachClip);
-            if (intestineClip)
-                intestineAction = mixer.clipAction(intestineClip);
+            if (intestineClip) intestineAction = mixer.clipAction(intestineClip);
 
             slowAction?.setLoop(THREE.LoopRepeat).play();
             stomachAction?.setLoop(THREE.LoopRepeat).play();
@@ -244,6 +286,7 @@ function loadModel() {
         (error) => console.error("GLB 로드 실패:", error)
     );
 }
+
 
 function createGlitterParticle(colorHex) {
     const geo = new THREE.SphereGeometry(PARTICLE_SIZE, 8, 8);
@@ -302,7 +345,21 @@ function stopCurrentWave() {
             p.material.opacity = 1.0;
         });
     }
+    // pupilLeft/right도 같이 비활성화(겹침방지)
+    if (glitterParticles['pupilLeft']) {
+        glitterParticles['pupilLeft'].forEach(p => {
+            p.visible = false;
+            p.material.opacity = 1.0;
+        });
+    }
+    if (glitterParticles['pupilRight']) {
+        glitterParticles['pupilRight'].forEach(p => {
+            p.visible = false;
+            p.material.opacity = 1.0;
+        });
+    }
 }
+
 
 function interpolateWaypoints(waypoints, spacing = 0.03) {
     const finePath = [];
@@ -324,22 +381,91 @@ function interpolateWaypoints(waypoints, spacing = 0.03) {
 }
 
 function animateRoute(organ) {
-  if (currentNerveType == null) {
+    if (currentNerveType == null) {
         console.warn("신경 유형이 선택되지 않았습니다. (중립 상태)");
         return;
     }
     stopCurrentWave();
 
-    const route = routes[organ];
-    if (!route) return;
     let colorHex = 0xff3366;
     if (currentNerveType === "parasympathetic") colorHex = 0x3399ff;
+
+    // pupil 분기 처리
+    if (organ === "pupil") {
+        const route = routes.pupil;
+        if (!route) return;
+
+        // 동공 경로만 빠르게
+        const pupilCommonSpeed = 1.2; // 공통 경로 속도
+        const pupilBranchSpeed = 1.2; // 분기 후 속도
+
+        const fineCommon = interpolateWaypoints(route.common, 0.03);
+        animateGlitterWave(
+            fineCommon,
+            glitterParticles['pupilLeft'],
+            colorHex,
+            () => {
+                let branchDoneCount = 0;
+                const onBranchDone = () => {
+                    branchDoneCount++;
+                    if (branchDoneCount === 2) {
+                        dimModel(false);
+                        renderer.render(scene, camera);
+                    }
+                };
+
+                const fineLeft = interpolateWaypoints(route.left.slice(route.common.length), 0.03);
+                const fineRight = interpolateWaypoints(route.right.slice(route.common.length), 0.03);
+
+                animateGlitterWave(
+                    fineLeft,
+                    glitterParticles['pupilLeft'],
+                    colorHex,
+                    onBranchDone,
+                    false,
+                    pupilBranchSpeed, // 분기 후 속도
+                    null,
+                    true
+                );
+                animateGlitterWave(
+                    fineRight,
+                    glitterParticles['pupilRight'],
+                    colorHex,
+                    onBranchDone,
+                    false,
+                    pupilBranchSpeed, // 분기 후 속도
+                    null,
+                    true
+                );
+            },
+            false,
+            pupilCommonSpeed, // 공통 경로 속도
+            null,
+            true
+        );
+        return;
+    }
+
+    // 기타 organ은 기존 방식
+    const route = routes[organ];
+    if (!route) return;
 
     const finePath = interpolateWaypoints(route.waypoints, 0.03);
     animateGlitterWave(finePath, glitterParticles[organ], colorHex);
 }
 
-function animateGlitterWave(waypoints, particles, colorHex = 0xff3366, callback, skipTrailFade = false, stepTOverride = null, holdOverride = null) {
+
+
+function animateGlitterWave(
+    waypoints,
+    particles,
+    colorHex = 0xff3366,
+    callback,
+    skipTrailFade = false,
+    stepTOverride = null,
+    holdOverride = null,
+    keepDimmed = false // 추가 파라미터: true면 끝나도 dimModel(false) 호출 안함
+) {
     for (const p of particles) {
         p.visible = false;
         p.material.color.set(colorHex);
@@ -385,9 +511,10 @@ function animateGlitterWave(waypoints, particles, colorHex = 0xff3366, callback,
 
         if (headIdx >= N + particles.length * gap) {
             particles.forEach(p => p.visible = false);
-            dimModel(false);
-            renderer.render(scene, camera);
+            // === 모델 밝기 복구를 콜백 쪽에서만 관리 ===
             if (callback) callback();
+            else if (!keepDimmed) dimModel(false); // 기본은 밝기 복구
+            renderer.render(scene, camera);
             return;
         }
 
@@ -396,6 +523,7 @@ function animateGlitterWave(waypoints, particles, colorHex = 0xff3366, callback,
 
     currentWaveRAF = requestAnimationFrame(step);
 }
+
 
 function dimModel(dim) {
     if (!modelRoot) return;
