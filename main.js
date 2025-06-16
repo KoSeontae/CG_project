@@ -12,308 +12,441 @@ const rotationSpeed = 0.02;
 let mixer, slowAction, fastAction, stomachAction, intestineAction, clock;
 let currentNerveType = null;
 
+let currentWaveRAF = null;
+let currentWaveFadeInterval = null;
+let currentParticles = [];
+
 const routes = {};
-const glitters = {};
+const glitterParticles = {};
+const PARTICLE_COUNT = 10;
+const PARTICLE_SIZE = 0.025;
 
 init();
 loadModel();
 animate();
 
 function init() {
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x222222);
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x222222);
 
-  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-  const dirLight = new THREE.DirectionalLight(0xffffff, 1);
-  dirLight.position.set(5, 10, 7.5);
-  scene.add(dirLight);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+    dirLight.position.set(5, 10, 7.5);
+    scene.add(dirLight);
 
-  camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-  camera.position.set(0, 2, 6);
-
-  renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  document.body.appendChild(renderer.domElement);
-
-  controls = new OrbitControls(camera, renderer.domElement);
-  controls.enableRotate = false;
-  controls.enablePan = false;
-
-  initialCameraPosition = camera.position.clone();
-  initialTarget = controls.target.clone();
-
-  clock = new THREE.Clock();
-
-  // lil-gui
-  const gui = new window.lilgui();
-  gui.domElement.style.position = 'absolute';
-  gui.domElement.style.top = '10px';
-  gui.domElement.style.left = '10px';
-
-  const nerveFolder = gui.addFolder('신경 유형 선택');
-  nerveFolder.add({ '교감 활성화': activateSympathetic }, '교감 활성화');
-  nerveFolder.add({ '부교감 활성화': activateParasympathetic }, '부교감 활성화');
-
-  const organFolder = gui.addFolder('기관 선택');
-  organFolder.add({ 심장: () => animateRoute('heart') }, '심장');
-  organFolder.add({ 소화계: () => animateRoute('digestive') }, '소화계');
-
-  window.addEventListener('resize', onWindowResize);
-  window.addEventListener('keydown', onKeyDown);
-
-  const canvas = renderer.domElement;
-  canvas.addEventListener('mousedown', e => {
-    isDragging = true;
-    previousMousePosition.x = e.clientX;
-    previousMousePosition.y = e.clientY;
-  });
-  canvas.addEventListener('mousemove', e => {
-    if (!isDragging || !modelPivot) return;
-    const deltaMove = {
-      x: e.clientX - previousMousePosition.x,
-      y: e.clientY - previousMousePosition.y
-    };
-    const deltaQuat = new THREE.Quaternion().setFromEuler(
-      new THREE.Euler(
-        deltaMove.y * rotationSpeed,
-        deltaMove.x * rotationSpeed,
-        0,
-        'XYZ'
-      )
+    camera = new THREE.PerspectiveCamera(
+        60,
+        window.innerWidth / window.innerHeight,
+        0.1,
+        1000
     );
-    modelPivot.quaternion.multiplyQuaternions(deltaQuat, modelPivot.quaternion);
-    previousMousePosition.x = e.clientX;
-    previousMousePosition.y = e.clientY;
-  });
-  canvas.addEventListener('mouseup', () => isDragging = false);
+    camera.position.set(0, 2, 6);
+
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableRotate = false;
+    controls.enablePan = false;
+
+    initialCameraPosition = camera.position.clone();
+    initialTarget = controls.target.clone();
+
+    clock = new THREE.Clock();
+
+    // lil-gui
+    const gui = new window.lilgui();
+    gui.domElement.style.position = "absolute";
+    gui.domElement.style.top = "10px";
+    gui.domElement.style.left = "10px";
+
+    const nerveFolder = gui.addFolder("신경 유형 선택");
+    nerveFolder.add({ "교감 활성화": activateSympathetic }, "교감 활성화");
+    nerveFolder.add(
+        { "부교감 활성화": activateParasympathetic },
+        "부교감 활성화"
+    );
+
+    const organFolder = gui.addFolder("기관 선택");
+    organFolder.add({ 심장: () => animateRoute("heart") }, "심장");
+    organFolder.add({ 소화계: () => animateRoute("digestive") }, "소화계");
+    organFolder.add({ 동공: () => animateRoute("pupil") }, "동공");
+    organFolder.add({ 폐: () => animateRoute("lung") }, "폐");
+
+    window.addEventListener("resize", onWindowResize);
+    window.addEventListener("keydown", onKeyDown);
+
+    const canvas = renderer.domElement;
+    canvas.addEventListener("mousedown", (e) => {
+        isDragging = true;
+        previousMousePosition.x = e.clientX;
+        previousMousePosition.y = e.clientY;
+    });
+    canvas.addEventListener("mousemove", (e) => {
+        if (!isDragging || !modelPivot) return;
+        const deltaMove = {
+            x: e.clientX - previousMousePosition.x,
+            y: e.clientY - previousMousePosition.y,
+        };
+        const deltaQuat = new THREE.Quaternion().setFromEuler(
+            new THREE.Euler(
+                deltaMove.y * rotationSpeed,
+                deltaMove.x * rotationSpeed,
+                0,
+                "XYZ"
+            )
+        );
+        modelPivot.quaternion.multiplyQuaternions(
+            deltaQuat,
+            modelPivot.quaternion
+        );
+        previousMousePosition.x = e.clientX;
+        previousMousePosition.y = e.clientY;
+    });
+    canvas.addEventListener("mouseup", () => (isDragging = false));
 }
 
 function loadModel() {
-  const loader = new GLTFLoader();
-  loader.load(
-    'test_animation.glb',
-    gltf => {
-      const sceneBB = new THREE.Box3().setFromObject(gltf.scene);
-      const center = sceneBB.getCenter(new THREE.Vector3());
+    const loader = new GLTFLoader();
+    loader.load(
+        "model.glb",
+        (gltf) => {
+            const sceneBB = new THREE.Box3().setFromObject(gltf.scene);
+            const center = sceneBB.getCenter(new THREE.Vector3());
 
-      modelPivot = new THREE.Group();
-      modelPivot.position.copy(center);
-      scene.add(modelPivot);
+            modelPivot = new THREE.Group();
+            modelPivot.position.copy(center);
+            scene.add(modelPivot);
 
-      gltf.scene.position.sub(center);
-      modelPivot.add(gltf.scene);
-      modelRoot = gltf.scene;
+            gltf.scene.position.sub(center);
+            modelPivot.add(gltf.scene);
+            modelRoot = gltf.scene;
 
-      controls.target.copy(center);
-      controls.update();
-      initialTarget.copy(center);
+            controls.target.copy(center);
+            controls.update();
+            initialTarget.copy(center);
+            const nodeSets = {
+                heart: {
+                    type: ["sympathetic", "parasympathetic"],
+                    nodes: [
+                        "Hypothalamusr_grp1091",
+                        "Spinal_dura003_BezierCurve458",
+                        "Heart_Generated_Mesh_From_X3D787",
+                    ],
+                },
+                digestive: {
+                    type: ["sympathetic", "parasympathetic"],
+                    nodes: [
+                        "Hypothalamusr_grp1091",
+                        "Spinal_dura003_BezierCurve458",
+                        "Oesophagus_Generated_Mesh_From_X3D731",
+                        "Stomach001_grp1846",
+                        "Small_intestine_grp11973",
+                        "Ascending_colon_grp1480",
+                        "Transverse_colon_grp1455",
+                        "Descending_colon_grp1280",
+                    ],
+                },
+                pupil: {
+                    type: ["sympathetic", "parasympathetic"],
+                    common: [
+                        "Hypothalamusr_grp1091",
+                        "Midbrainl_grp1067",
+                        "Optic_chiasml_grp1061"
+                    ],
+                    left: [
+                        "Optic_nerve_(II)l_BezierCurve494",
+                        "Iris-l_grp1077"
+                    ],
+                    right: [
+                        "Optic_nerve_(II)r_BezierCurve494",
+                        "Iris-r_grp1077"
+                    ]
+                },
+                lung: {
+                    type: ["sympathetic", "parasympathetic"],
+                    nodes: [
+                        "Hypothalamusr_grp1091",
+                        "Spinal_dura003_BezierCurve458",
+                        "Trachea_Generated_Mesh_From_X3D829",
+                        //"Superior_lobe_of_right_lung_Generated_Mesh_From_X3D814"
+                        "4th_ribr_Generated_Mesh_From_X3D860"
+                    ],
+                }
+            };
 
-      // ✳️ 기관별 경로 및 신경 타입 설정
-      const nodeSets = {
-        heart: {
-          type: ['sympathetic', 'parasympathetic'],
-          nodes: [
-            'Hypothalamusr_grp1091',
-            'Spinal_dura003_BezierCurve458',
-            'Heart_Generated_Mesh_From_X3D787']
+            scene.updateMatrixWorld(true);
+            for (const organ in nodeSets) {
+                let nodeNames = [];
+                // pupil은 common+left 만을 기본 경로로 사용(필요시 right로도 가능)
+                if (organ === 'pupil') {
+                    nodeNames = [
+                        ...nodeSets.pupil.common,
+                        ...nodeSets.pupil.left
+                    ];
+                } else {
+                    nodeNames = nodeSets[organ].nodes;
+                }
+                const waypoints = nodeNames
+                    .map((name) => {
+                        const obj = modelRoot.getObjectByName(name);
+                        if (!obj) {
+                            console.warn(`⚠️ 노드 없음: ${name}`);
+                            return null;
+                        }
+                        const box = new THREE.Box3().setFromObject(obj);
+                        return box.getCenter(new THREE.Vector3()).sub(center);
+                    })
+                    .filter((v) => v !== null);
+
+                routes[organ] = {
+                    type: nodeSets[organ].type,
+                    waypoints,
+                };
+
+                glitterParticles[organ] = [];
+                for (let i = 0; i < PARTICLE_COUNT; i++) {
+                    glitterParticles[organ].push(createGlitterParticle(0xff3366));
+                }
+            }
+
+            // 애니메이션
+            mixer = new THREE.AnimationMixer(gltf.scene);
+            const slowClip = THREE.AnimationClip.findByName(
+                gltf.animations,
+                "SlowHeartbeat"
+            );
+            const fastClip = THREE.AnimationClip.findByName(
+                gltf.animations,
+                "FastHeartbeat"
+            );
+            const stomachClip = THREE.AnimationClip.findByName(
+                gltf.animations,
+                "StomachMoving"
+            );
+            const intestineClip = THREE.AnimationClip.findByName(
+                gltf.animations,
+                "IntestineMoving"
+            );
+
+            if (slowClip) slowAction = mixer.clipAction(slowClip);
+            if (fastClip) fastAction = mixer.clipAction(fastClip);
+            if (stomachClip) stomachAction = mixer.clipAction(stomachClip);
+            if (intestineClip)
+                intestineAction = mixer.clipAction(intestineClip);
+
+            slowAction?.setLoop(THREE.LoopRepeat).play();
+            stomachAction?.setLoop(THREE.LoopRepeat).play();
+            intestineAction?.setLoop(THREE.LoopRepeat).play();
         },
-        digestive: {
-          type: ['sympathetic', 'parasympathetic'],
-          nodes: [
-            'Hypothalamusr_grp1091',
-            'Spinal_dura003_BezierCurve458',
-            'Oesophagus_Generated_Mesh_From_X3D731',
-            'Stomach001_grp1846',
-            'Small_intestine_grp11973',
-            'Ascending_colon_grp1480', 
-            'Transverse_colon_grp1455', 
-            'Descending_colon_grp1280']
+        undefined,
+        (error) => console.error("GLB 로드 실패:", error)
+    );
+}
+
+function createGlitterParticle(colorHex) {
+    const geo = new THREE.SphereGeometry(PARTICLE_SIZE, 8, 8);
+    const mat = new THREE.MeshStandardMaterial({
+        color: colorHex,
+        emissive: colorHex,
+        emissiveIntensity: 2.0,
+        transparent: true,
+        opacity: 1.0
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.visible = false;
+    modelPivot.add(mesh);
+    return mesh;
+}
+
+function setGlitterColorAll(colorHex) {
+    for (const key in glitterParticles) {
+        for (const p of glitterParticles[key]) {
+            p.material.color.set(colorHex);
+            p.material.emissive.set(colorHex);
         }
-      };
-
-      scene.updateMatrixWorld(true);
-      for (const organ in nodeSets) {
-        const nodeNames = nodeSets[organ].nodes;
-        const waypoints = nodeNames.map(name => {
-          const obj = modelRoot.getObjectByName(name);
-          if (!obj) {
-            console.warn(`⚠️ 노드 없음: ${name}`);
-            return null;
-          }
-          const box = new THREE.Box3().setFromObject(obj);
-          return box.getCenter(new THREE.Vector3()).sub(center);
-        }).filter(v => v !== null);
-
-        routes[organ] = {
-          type: nodeSets[organ].type,
-          waypoints
-        };
-
-        const gGeo = new THREE.SphereGeometry(0.05, 8, 8);
-        const gMat = new THREE.MeshStandardMaterial({
-          color: 0xaaaaaa,
-          emissive: 0xaaaaaa,
-          emissiveIntensity: 1.5,
-          transparent: true,
-          opacity: 1.0
-        });
-
-        const glitter = new THREE.Mesh(gGeo, gMat);
-        glitter.visible = false;
-        modelPivot.add(glitter);
-        glitters[organ] = glitter;
-      }
-
-      // 애니메이션
-      mixer = new THREE.AnimationMixer(gltf.scene);
-      const slowClip = THREE.AnimationClip.findByName(gltf.animations, 'SlowHeartbeat');
-      const fastClip = THREE.AnimationClip.findByName(gltf.animations, 'FastHeartbeat');
-      const stomachClip = THREE.AnimationClip.findByName(gltf.animations, 'StomachMoving');
-      const intestineClip = THREE.AnimationClip.findByName(gltf.animations, 'IntestineMoving');
-
-      if (slowClip) slowAction = mixer.clipAction(slowClip);
-      if (fastClip) fastAction = mixer.clipAction(fastClip);
-      if (stomachClip) stomachAction = mixer.clipAction(stomachClip);
-      if (intestineClip) intestineAction = mixer.clipAction(intestineClip);
-
-      slowAction?.setLoop(THREE.LoopRepeat).play();
-      stomachAction?.setLoop(THREE.LoopRepeat).play();
-      intestineAction?.setLoop(THREE.LoopRepeat).play();
-    },
-    undefined,
-    error => console.error('GLB 로드 실패:', error)
-  );
+    }
 }
 
 function activateSympathetic() {
-  currentNerveType = 'sympathetic';
-
-  for (const glitter of Object.values(glitters)) {
-    glitter.material.color.set(0xff3366);
-    glitter.material.emissive.set(0xff3366);
-  }
-
-  if (!mixer || !slowAction || !fastAction) return;
-  slowAction.crossFadeTo(fastAction, 0.5, true);
-  stomachAction?.stop();
-  intestineAction?.stop();
+    currentNerveType = "sympathetic";
+    setGlitterColorAll(0xff3366);
+    if (!mixer || !slowAction || !fastAction) return;
+    slowAction.crossFadeTo(fastAction, 0.5, true);
+    stomachAction?.stop();
+    intestineAction?.stop();
 }
 
 function activateParasympathetic() {
-  currentNerveType = 'parasympathetic';
+    currentNerveType = "parasympathetic";
+    setGlitterColorAll(0x3399ff);
+    if (!mixer || !fastAction || !slowAction) return;
+    fastAction.crossFadeTo(slowAction, 0.5, true);
+    stomachAction?.reset().setLoop(THREE.LoopRepeat).play();
+    intestineAction?.reset().setLoop(THREE.LoopRepeat).play();
+}
 
-  for (const glitter of Object.values(glitters)) {
-    glitter.material.color.set(0x3399ff);
-    glitter.material.emissive.set(0x3399ff);
-  }
+function stopCurrentWave() {
+    if (currentWaveRAF) {
+        cancelAnimationFrame(currentWaveRAF);
+        currentWaveRAF = null;
+    }
+    if (currentWaveFadeInterval) {
+        clearInterval(currentWaveFadeInterval);
+        currentWaveFadeInterval = null;
+    }
+    if (currentParticles && currentParticles.length) {
+        currentParticles.forEach(p => {
+            p.visible = false;
+            p.material.opacity = 1.0;
+        });
+    }
+}
 
-  if (!mixer || !fastAction || !slowAction) return;
-  fastAction.crossFadeTo(slowAction, 0.5, true);
-  stomachAction?.reset().setLoop(THREE.LoopRepeat).play();
-  intestineAction?.reset().setLoop(THREE.LoopRepeat).play();
+function interpolateWaypoints(waypoints, spacing = 0.03) {
+    const finePath = [];
+    if (waypoints.length < 2) return waypoints;
+    for (let i = 0; i < waypoints.length - 1; i++) {
+        const start = waypoints[i];
+        const end = waypoints[i + 1];
+        const segVec = new THREE.Vector3().subVectors(end, start);
+        const segLen = segVec.length();
+        const steps = Math.ceil(segLen / spacing);
+        for (let s = 0; s < steps; s++) {
+            const t = s / steps;
+            const pt = new THREE.Vector3().lerpVectors(start, end, t);
+            finePath.push(pt);
+        }
+    }
+    finePath.push(waypoints[waypoints.length - 1]);
+    return finePath;
 }
 
 function animateRoute(organ) {
-  const route = routes[organ];
-  const glitter = glitters[organ];
-  if (!route || !glitter) return;
-
-  // type이 배열일 경우, 현재 신경 타입이 포함되어 있으면 통과
-  if (
-    route.type &&
-    Array.isArray(route.type) &&
-    !route.type.includes(currentNerveType)
-  ) {
-    console.warn(`⚠️ ${organ}는 ${route.type} 신경입니다. 현재는 ${currentNerveType} 모드입니다.`);
-    return;
-  }
-  // type이 문자열인 경우(이전 방식 호환)
-  if (
-    route.type &&
-    !Array.isArray(route.type) &&
-    route.type !== 'both' &&
-    route.type !== currentNerveType
-  ) {
-    console.warn(`⚠️ ${organ}는 ${route.type} 신경입니다. 현재는 ${currentNerveType} 모드입니다.`);
-    return;
-  }
-
-  let idx = 0;
-  glitter.visible = true;
-  dimModel(true);
-  const points = route.waypoints;
-
-  const step = () => {
-    if (idx >= points.length - 1) {
-      glitter.visible = false;
-      dimModel(false);
-      return;
+  if (currentNerveType == null) {
+        console.warn("신경 유형이 선택되지 않았습니다. (중립 상태)");
+        return;
     }
-    const from = points[idx], to = points[idx + 1];
-    let t = 0;
-    const tick = () => {
-      t += 0.1;
-      if (t >= 1) {
-        idx++;
-        return step();
-      }
-      glitter.position.lerpVectors(from, to, t);
-      glitter.material.opacity = 1 - (t * 0.5);
-      requestAnimationFrame(tick);
-    };
-    tick();
-  };
+    stopCurrentWave();
 
-  step();
+    const route = routes[organ];
+    if (!route) return;
+    let colorHex = 0xff3366;
+    if (currentNerveType === "parasympathetic") colorHex = 0x3399ff;
+
+    const finePath = interpolateWaypoints(route.waypoints, 0.03);
+    animateGlitterWave(finePath, glitterParticles[organ], colorHex);
+}
+
+function animateGlitterWave(waypoints, particles, colorHex = 0xff3366, callback, skipTrailFade = false, stepTOverride = null, holdOverride = null) {
+    for (const p of particles) {
+        p.visible = false;
+        p.material.color.set(colorHex);
+        p.material.emissive.set(colorHex);
+        p.material.opacity = 1.0;
+        p.material.transparent = true;
+    }
+    currentParticles = particles;
+
+    let t = 0;
+    const N = waypoints.length - 1;
+    const stepT = stepTOverride !== null ? stepTOverride : 0.8;
+    const gap = 0.5;
+    const LAST = 1;
+    const HOLD = holdOverride !== null ? holdOverride : 300;
+    const FINT = 10;
+    let elapsed = 0;
+
+    function step() {
+        dimModel(true);
+
+        t += stepT;
+        const headIdx = t;
+
+        for (let i = 0; i < particles.length; i++) {
+            const idx = headIdx - i * gap;
+            if (idx >= 0 && idx <= N) {
+                const lo = Math.floor(idx), hi = Math.min(lo + 1, N);
+                const alpha = idx - lo;
+                particles[i].position.lerpVectors(
+                    waypoints[lo],
+                    waypoints[hi],
+                    alpha
+                );
+                particles[i].visible = true;
+            } else {
+                particles[i].visible = false;
+            }
+        }
+
+        controls.update();
+        renderer.render(scene, camera);
+
+        if (headIdx >= N + particles.length * gap) {
+            particles.forEach(p => p.visible = false);
+            dimModel(false);
+            renderer.render(scene, camera);
+            if (callback) callback();
+            return;
+        }
+
+        currentWaveRAF = requestAnimationFrame(step);
+    }
+
+    currentWaveRAF = requestAnimationFrame(step);
 }
 
 function dimModel(dim) {
-  if (!modelRoot) return;
-  modelRoot.traverse(obj => {
-    if (obj.isMesh) {
-      obj.material.transparent = true;
-      obj.material.opacity = dim ? 0.2 : 1.0;
-    }
-  });
+    if (!modelRoot) return;
+    modelRoot.traverse(obj => {
+        if (obj.isMesh) {
+            obj.material.transparent = true;
+            obj.material.opacity = dim ? 0.1 : 1.0;
+        }
+    });
 }
 
 function onKeyDown(e) {
-  if (e.code === 'KeyR') {
-    camera.position.copy(initialCameraPosition);
-    controls.target.copy(initialTarget);
-    controls.update();
-    if (modelPivot) modelPivot.quaternion.set(0, 0, 0, 1);
-  }
-  const MOVE_STEP = 0.2;
-  // 카메라가 바라보는 방향 벡터 구하기
-  const forward = new THREE.Vector3().subVectors(controls.target, camera.position).normalize();
-  const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
-  const up = new THREE.Vector3().crossVectors(right, forward).normalize();
+    if (e.code === 'KeyR') {
+        camera.position.copy(initialCameraPosition);
+        controls.target.copy(initialTarget);
+        controls.update();
+        if (modelPivot) modelPivot.quaternion.set(0, 0, 0, 1);
+        return;
+    }
+    const MOVE_STEP = 0.2;
 
-  let move = new THREE.Vector3();
-  if (e.code === 'KeyW' || e.code === 'ArrowUp')  move.addScaledVector(up, -1);
-  if (e.code === 'KeyS' || e.code === 'ArrowDown') move.add(up);
-  if (e.code === 'KeyA' || e.code === 'ArrowRLeft') move.add(right);
-  if (e.code === 'KeyD' || e.code === 'ArrowRight') move.addScaledVector(right, -1);
+    // 카메라가 바라보는 방향 벡터
+    const forward = new THREE.Vector3().subVectors(controls.target, camera.position).normalize();
+    const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+    const up = new THREE.Vector3().crossVectors(right, forward).normalize();
 
-  if (move.lengthSq() > 0) {
-    move.normalize().multiplyScalar(MOVE_STEP);
-    camera.position.add(move);
-    controls.target.add(move);
-    controls.update();
+    let move = new THREE.Vector3();
+    if (e.code === 'KeyW' || e.code === 'ArrowUp')    move.addScaledVector(up, -1);
+    if (e.code === 'KeyS' || e.code === 'ArrowDown')  move.add(up);
+    if (e.code === 'KeyA' || e.code === 'ArrowLeft')  move.add(right);
+    if (e.code === 'KeyD' || e.code === 'ArrowRight') move.addScaledVector(right, -1);
+
+    if (move.lengthSq() > 0) {
+        move.normalize().multiplyScalar(MOVE_STEP);
+        camera.position.add(move);
+        controls.target.add(move);
+        controls.update();
+    }
 }
-}
+
 
 function onWindowResize() {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
 function animate() {
-  requestAnimationFrame(animate);
-  const delta = clock.getDelta();
-  if (mixer) mixer.update(delta);
-  controls.update();
-  renderer.render(scene, camera);
+    requestAnimationFrame(animate);
+    const delta = clock.getDelta();
+    if (mixer) mixer.update(delta);
+    controls.update();
+    renderer.render(scene, camera);
 }
