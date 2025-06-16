@@ -112,7 +112,10 @@ function loadModel() {
       const nodeSets = {
         heart: {
           type: ['sympathetic', 'parasympathetic'],
-          nodes: ['Hypothalamusr_grp1091', 'Spinal_dura003_BezierCurve458', 'Heart_Generated_Mesh_From_X3D787']
+          nodes: [
+            'Hypothalamusr_grp1091',
+            'Spinal_dura003_BezierCurve458',
+            'Heart_Generated_Mesh_From_X3D787']
         },
         digestive: {
           type: ['sympathetic', 'parasympathetic'],
@@ -235,7 +238,6 @@ function animateRoute(organ) {
     return;
   }
 
-  // 이하 애니메이션 코드는 동일
   let idx = 0;
   glitter.visible = true;
   dimModel(true);
@@ -282,6 +284,24 @@ function onKeyDown(e) {
     controls.update();
     if (modelPivot) modelPivot.quaternion.set(0, 0, 0, 1);
   }
+  const MOVE_STEP = 0.2;
+  // 카메라가 바라보는 방향 벡터 구하기
+  const forward = new THREE.Vector3().subVectors(controls.target, camera.position).normalize();
+  const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+  const up = new THREE.Vector3().crossVectors(right, forward).normalize();
+
+  let move = new THREE.Vector3();
+  if (e.code === 'KeyW' || e.code === 'ArrowUp')  move.addScaledVector(up, -1);
+  if (e.code === 'KeyS' || e.code === 'ArrowDown') move.add(up);
+  if (e.code === 'KeyA' || e.code === 'ArrowRLeft') move.add(right);
+  if (e.code === 'KeyD' || e.code === 'ArrowRight') move.addScaledVector(right, -1);
+
+  if (move.lengthSq() > 0) {
+    move.normalize().multiplyScalar(MOVE_STEP);
+    camera.position.add(move);
+    controls.target.add(move);
+    controls.update();
+}
 }
 
 function onWindowResize() {
