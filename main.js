@@ -9,15 +9,7 @@ let isDragging = false;
 const previousMousePosition = { x: 0, y: 0 };
 const rotationSpeed = 0.02;
 
-let mixer,
-    slowAction,
-    fastAction,
-    stomachAction,
-    intestineAction,
-    clock,
-    lungAction,
-    lungFastAction;
-let pupilLeftMesh, pupilRightMesh;
+let mixer, slowAction, fastAction, stomachAction, intestineAction, clock;
 let currentNerveType = null;
 
 let currentWaveRAF = null;
@@ -122,10 +114,7 @@ function loadModel() {
         (gltf) => {
             const sceneBB = new THREE.Box3().setFromObject(gltf.scene);
             const center = sceneBB.getCenter(new THREE.Vector3());
-            const animations = gltf.animations;
-            animations.forEach((clip, index) => {
-                console.log(`  ${index + 1}. ${clip.name}`);
-            });
+
             modelPivot = new THREE.Group();
             modelPivot.position.copy(center);
             scene.add(modelPivot);
@@ -134,17 +123,10 @@ function loadModel() {
             modelPivot.add(gltf.scene);
             modelRoot = gltf.scene;
 
-      gltf.scene.position.sub(center);
-      modelPivot.add(gltf.scene);
-      modelRoot = gltf.scene;
-
-      controls.target.copy(center);
-      controls.update();
-      initialTarget.copy(center);
-
             controls.target.copy(center);
             controls.update();
             initialTarget.copy(center);
+
             // nodeSets 정의 (각 기관별 노드명)
             const nodeSets = {
                 heart: {
@@ -276,36 +258,6 @@ function loadModel() {
                         type: nodeSets[organ].type,
                         waypoints,
                     };
-            // 애니메이션
-            mixer = new THREE.AnimationMixer(gltf.scene);
-            const slowClip = THREE.AnimationClip.findByName(
-                gltf.animations,
-                "SlowHeartbeat"
-            );
-            const fastClip = THREE.AnimationClip.findByName(
-                gltf.animations,
-                "FastHeartbeat"
-            );
-            const stomachClip = THREE.AnimationClip.findByName(
-                gltf.animations,
-                "StomachMoving"
-            );
-            const intestineClip = THREE.AnimationClip.findByName(
-                gltf.animations,
-                "IntestineMoving"
-            );
-            const lungClip = THREE.AnimationClip.findByName(
-                gltf.animations,
-                "LungAnimation"
-            );
-            const lungFastClip = THREE.AnimationClip.findByName(
-                gltf.animations,
-                "LungAnimationFast"
-            );
-            const eyeSLClip = THREE.AnimationClip.findByName(
-                gltf.animations,
-                "eyesmallerleft"
-            );
 
                     glitterParticles[organ] = [];
                     for (let i = 0; i < PARTICLE_COUNT; i++) {
@@ -313,26 +265,28 @@ function loadModel() {
                     }
                 }
             }
+
+            // --- Animation Mixer 및 클립(기존 코드 유지) ---
+            mixer = new THREE.AnimationMixer(gltf.scene);
+            const slowClip = THREE.AnimationClip.findByName(gltf.animations, "SlowHeartbeat");
+            const fastClip = THREE.AnimationClip.findByName(gltf.animations, "FastHeartbeat");
+            const stomachClip = THREE.AnimationClip.findByName(gltf.animations, "StomachMoving");
+            const intestineClip = THREE.AnimationClip.findByName(gltf.animations, "IntestineMoving");
+
             if (slowClip) slowAction = mixer.clipAction(slowClip);
             if (fastClip) fastAction = mixer.clipAction(fastClip);
             if (stomachClip) stomachAction = mixer.clipAction(stomachClip);
-            if (intestineClip)
-                intestineAction = mixer.clipAction(intestineClip);
-            if (lungClip) lungAction = mixer.clipAction(lungClip);
-            if (lungFastClip) lungFastAction = mixer.clipAction(lungFastClip);
+            if (intestineClip) intestineAction = mixer.clipAction(intestineClip);
 
             slowAction?.setLoop(THREE.LoopRepeat).play();
             stomachAction?.setLoop(THREE.LoopRepeat).play();
             intestineAction?.setLoop(THREE.LoopRepeat).play();
-            lungAction?.setLoop(THREE.LoopRepeat).play();
         },
         undefined,
         (error) => console.error("GLB 로드 실패:", error)
     );
 }
 
-function activateSympathetic() {
-    currentNerveType = "sympathetic";
 
 function createGlitterParticle(colorHex) {
     const geo = new THREE.SphereGeometry(PARTICLE_SIZE, 8, 8);
@@ -348,11 +302,6 @@ function createGlitterParticle(colorHex) {
     modelPivot.add(mesh);
     return mesh;
 }
-    for (const glitter of Object.values(glitters)) {
-        glitter.material.color.set(0xff3366);
-        glitter.material.emissive.set(0xff3366);
-    }
-    if (!mixer || !slowAction || !fastAction) return;
 
 function setGlitterColorAll(colorHex) {
     for (const key in glitterParticles) {
@@ -361,15 +310,6 @@ function setGlitterColorAll(colorHex) {
             p.material.emissive.set(colorHex);
         }
     }
-    if (pupilLeftMesh) pupilLeftMesh.scale.set(1.2, 1.2, 1.2);
-    if (pupilRightMesh) pupilRightMesh.scale.set(1.2, 1.2, 1.2);
-
-    fastAction.reset().setLoop(THREE.LoopRepeat).play();
-    lungFastAction.reset().setLoop(THREE.LoopRepeat).play();
-    lungAction.crossFadeTo(lungFastAction, 0.5, true);
-    slowAction.crossFadeTo(fastAction, 0.5, true);
-    stomachAction?.stop();
-    intestineAction?.stop();
 }
 
 function activateSympathetic() {
@@ -383,23 +323,61 @@ function activateSympathetic() {
 
 function activateParasympathetic() {
     currentNerveType = "parasympathetic";
-
-    for (const glitter of Object.values(glitters)) {
-        glitter.material.color.set(0x3399ff);
-        glitter.material.emissive.set(0x3399ff);
-    }
-
+    setGlitterColorAll(0x3399ff);
     if (!mixer || !fastAction || !slowAction) return;
-
-    if (pupilLeftMesh) pupilLeftMesh.scale.set(1, 1, 1);
-    if (pupilRightMesh) pupilRightMesh.scale.set(1, 1, 1);
-
-    slowAction.reset().setLoop(THREE.LoopRepeat).play();
-    lungAction.reset().setLoop(THREE.LoopRepeat).play();
     fastAction.crossFadeTo(slowAction, 0.5, true);
-    lungFastAction.crossFadeTo(lungAction, 0.5, true);
     stomachAction?.reset().setLoop(THREE.LoopRepeat).play();
     intestineAction?.reset().setLoop(THREE.LoopRepeat).play();
+}
+
+function stopCurrentWave() {
+    if (currentWaveRAF) {
+        cancelAnimationFrame(currentWaveRAF);
+        currentWaveRAF = null;
+    }
+    if (currentWaveFadeInterval) {
+        clearInterval(currentWaveFadeInterval);
+        currentWaveFadeInterval = null;
+    }
+    if (currentParticles && currentParticles.length) {
+        currentParticles.forEach(p => {
+            p.visible = false;
+            p.material.opacity = 1.0;
+        });
+    }
+    // pupilLeft/right도 같이 비활성화(겹침방지)
+    if (glitterParticles['pupilLeft']) {
+        glitterParticles['pupilLeft'].forEach(p => {
+            p.visible = false;
+            p.material.opacity = 1.0;
+        });
+    }
+    if (glitterParticles['pupilRight']) {
+        glitterParticles['pupilRight'].forEach(p => {
+            p.visible = false;
+            p.material.opacity = 1.0;
+        });
+    }
+}
+
+
+function interpolateWaypoints(waypoints, spacing = 0.03) {
+    const finePath = [];
+    if (waypoints.length < 2) return waypoints;
+    for (let i = 0; i < waypoints.length - 1; i++) {
+        const start = waypoints[i];
+        const end = waypoints[i + 1];
+        const segVec = new THREE.Vector3().subVectors(end, start);
+        const segLen = segVec.length();
+        const steps = Math.ceil(segLen / spacing);
+        for (let s = 0; s < steps; s++) {
+            const t = s / steps;
+            const pt = new THREE.Vector3().lerpVectors(start, end, t);
+            finePath.push(pt);
+        }
+    }
+    finePath.push(waypoints[waypoints.length - 1]);
+    return finePath;
 }
 
 function animateRoute(organ) {
