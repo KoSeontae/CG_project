@@ -6,6 +6,7 @@ let scene, camera, renderer, controls;
 let modelPivot, modelRoot;
 let initialCameraPosition, initialTarget;
 let isDragging = false;
+let loadingManager, loader;
 const previousMousePosition = { x: 0, y: 0 };
 const rotationSpeed = 0.02;
 
@@ -33,6 +34,29 @@ loadModel();
 animate();
 
 function init() {
+    // ── 로딩 매니저 세팅 ──
+    loadingManager = new THREE.LoadingManager();
+
+    loadingManager.onStart = function (url, itemsLoaded, itemsTotal) {
+        document.getElementById("loading-overlay").style.display = "flex";
+    };
+    loadingManager.onProgress = function (url, itemsLoaded, itemsTotal) {
+        const percent = Math.round((itemsLoaded / itemsTotal) * 100);
+        const bar = document.getElementById("progress-bar");
+        const text = document.getElementById("progress-text");
+        bar.style.width = percent + "%";
+        text.textContent = `Loading… ${percent}%`;
+    };
+    loadingManager.onLoad = function () {
+        document.getElementById("loading-overlay").style.display = "none";
+    };
+    loadingManager.onError = function (url) {
+        console.error("로딩 에러:", url);
+        document.getElementById("progress-text").textContent = "Load Error";
+    };
+
+    // ── GLTFLoader에 매니저 전달 ──
+    loader = new GLTFLoader(loadingManager);
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x222222);
 
@@ -119,6 +143,7 @@ function loadModel() {
     loader.load(
         "test_animation.glb",
         (gltf) => {
+            document.getElementById("loading-overlay").style.display = "none";
             const sceneBB = new THREE.Box3().setFromObject(gltf.scene);
             const center = sceneBB.getCenter(new THREE.Vector3());
 
@@ -340,7 +365,16 @@ function loadModel() {
             intestineAction?.setLoop(THREE.LoopRepeat).play();
             lungAction?.setLoop(THREE.LoopRepeat).play();
         },
-        undefined,
+        // onProgress: ProgressEvent 처리
+        (xhr) => {
+            if (xhr.lengthComputable) {
+                const percent = Math.round((xhr.loaded / xhr.total) * 100);
+                const bar = document.getElementById("progress-bar");
+                const text = document.getElementById("progress-text");
+                bar.style.width = percent + "%";
+                text.textContent = `Loading… ${percent}%`;
+            }
+        },
         (error) => console.error("GLB 로드 실패:", error)
     );
 }
