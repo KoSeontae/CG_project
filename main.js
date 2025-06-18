@@ -175,7 +175,7 @@ function loadModel() {
                     ],
                     right: [
                         "Optic_nerve_(II)r_BezierCurve494",
-                        "Iris-r_grp1077",
+                        "Retina-r_grp1047",
                     ],
                 },
                 lung: {
