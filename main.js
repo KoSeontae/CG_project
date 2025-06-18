@@ -369,10 +369,12 @@ function loadModel() {
         (xhr) => {
             if (xhr.lengthComputable) {
                 const percent = Math.round((xhr.loaded / xhr.total) * 100);
-                const bar = document.getElementById("progress-bar");
-                const text = document.getElementById("progress-text");
-                bar.style.width = percent + "%";
-                text.textContent = `Loading… ${percent}%`;
+                percent = Math.min(percent, 100); // 100% 초과 방지
+                document.getElementById("progress-bar").style.width =
+                    percent + "%";
+                document.getElementById(
+                    "progress-text"
+                ).textContent = `Loading… ${percent}%`;
             }
         },
         (error) => console.error("GLB 로드 실패:", error)
