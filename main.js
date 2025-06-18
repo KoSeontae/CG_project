@@ -368,7 +368,7 @@ function loadModel() {
         // onProgress: ProgressEvent 처리
         (xhr) => {
             if (xhr.lengthComputable) {
-                const percent = Math.round((xhr.loaded / xhr.total) * 100);
+                let percent = Math.round((xhr.loaded / xhr.total) * 100);
                 percent = Math.min(percent, 100); // 100% 초과 방지
                 document.getElementById("progress-bar").style.width =
                     percent + "%";
